@@ -1,0 +1,4 @@
+streamlit
+pandas
+plotly
+numpy # Keep this, but let pandas resolve its exact compatible version
