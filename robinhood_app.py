@@ -3,9 +3,60 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
+from collections import deque
+import numpy as np
 
 # --- Configuration ---
 DB_FILE = 'robinhood_portfolio.db'
+
+# --- Custom Functions for Calculations (re-implemented from our V2 pipeline) ---
+@st.cache_data
+def get_current_holdings(transactions_df):
+    """
+    Calculates the current open positions and their cost basis.
+    This logic mirrors our Phase 10/New Phase 6 calculation.
+    """
+    current_open_positions = {}
+    grouped_by_instrument = transactions_df.groupby('instrument')
+
+    for instrument_name, group in grouped_by_instrument:
+        instrument_relevant_actions = group[
+            group['transaction_category'] == 'Trade'
+        ].copy()
+
+        if instrument_relevant_actions.empty:
+            continue
+
+        instrument_current_quantity = 0.0
+        instrument_current_cost_basis = 0.0
+
+        for index, row in instrument_relevant_actions.iterrows():
+            trans_code = row['trans_code']
+            quantity_change = row['quantity']
+            price_adjusted = row['price']
+
+            instrument_current_quantity += quantity_change
+
+            if trans_code == 'Buy':
+                instrument_current_cost_basis += (quantity_change * price_adjusted)
+            elif trans_code == 'Sell':
+                if (instrument_current_quantity - quantity_change) > 1e-6:
+                    cost_per_share_before_sell = instrument_current_cost_basis / (instrument_current_quantity - quantity_change) if (instrument_current_quantity - quantity_change) > 1e-6 else 0
+                    instrument_current_cost_basis -= (cost_per_share_before_sell * quantity_change)
+
+        if abs(instrument_current_quantity) > 1e-6:
+            current_open_positions[instrument_name] = {
+                'quantity': instrument_current_quantity,
+                'cost_basis_total': instrument_current_cost_basis
+            }
+            
+    final_holdings_list = [
+        {'instrument': ticker, 'quantity': details['quantity'], 'cost_basis_total': details['cost_basis_total']}
+        for ticker, details in current_open_positions.items()
+    ]
+    current_holdings_df = pd.DataFrame(final_holdings_list)
+    return current_holdings_df
+
 
 # --- Step 1: Connect to the Database and Load Data ---
 st.header("Robinhood Portfolio Analysis (V2)")
@@ -38,55 +89,68 @@ finally:
     if conn:
         conn.close()
 
-# --- Placeholder for next steps ---
-# You can add code here to check the loaded dataframes
-# st.write(daily_portfolio_df.head())
-# st.write(closed_trades_df.head())
-# st.write(transactions_cleaned_df.head())
+# Ensure dataframes are properly prepared
+daily_portfolio_df.set_index('Date', inplace=True)
+daily_portfolio_df.sort_index(inplace=True)
 
-st.subheader("V2 Analysis & Visualizations")
+closed_trades_df['sell_date'] = pd.to_datetime(closed_trades_df['sell_date'])
 
-# (All subsequent Streamlit code for charts and metrics will go here)
-# --- Step 2: Calculate and Display Key Metrics ---
-if not daily_portfolio_df.empty:
-    # Calculate daily returns (simplified TWR method)
-    # Get previous day's total portfolio value
-    daily_portfolio_df['prev_day_value'] = daily_portfolio_df['Total_Portfolio_Value'].shift(1)
-    
-    # Calculate daily external cash flows from transactions_cleaned_df
-    external_cash_flow_categories = ['Cash_Movement', 'Income', 'Expense', 'Cash_Adjustment', 'Uncategorized'] 
-    daily_external_cash_flow = transactions_cleaned_df[
-        transactions_cleaned_df['transaction_category'].isin(external_cash_flow_categories)
-    ].groupby('activity_date')['amount'].sum()
-    
-    # Align cash flows with daily portfolio dataframe's index, fill missing days with 0
-    daily_cash_flow_aligned = daily_external_cash_flow.reindex(daily_portfolio_df['Date'], fill_value=0).fillna(0)
-    
-    # Calculate daily returns, adjusting for cash flows
-    daily_portfolio_df['return_base'] = daily_portfolio_df['prev_day_value'] + daily_cash_flow_aligned
-    daily_portfolio_df['daily_return_adjusted'] = (daily_portfolio_df['Total_Portfolio_Value'] - daily_portfolio_df['return_base']) / daily_portfolio_df['return_base']
-    daily_portfolio_df['daily_return_adjusted'].fillna(0, inplace=True)
-    daily_portfolio_df.loc[daily_portfolio_df['return_base'] <= 0, 'daily_return_adjusted'] = 0
-    
-    # Calculate cumulative TWR factor
-    daily_portfolio_df['cumulative_twr_factor'] = (1 + daily_portfolio_df['daily_return_adjusted']).cumprod()
-    overall_twr = (daily_portfolio_df['cumulative_twr_factor'].iloc[-1] - 1) * 100
-    
-    # Calculate Maximum Drawdown
-    daily_portfolio_df['peak_value'] = daily_portfolio_df['Total_Portfolio_Value'].expanding(min_periods=1).max()
-    daily_portfolio_df['drawdown'] = (daily_portfolio_df['Total_Portfolio_Value'] - daily_portfolio_df['peak_value']) / daily_portfolio_df['peak_value']
-    max_drawdown = daily_portfolio_df['drawdown'].min() * 100
-    
-    st.subheader("Portfolio Performance Summary")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(label="Overall Time-Weighted Return (TWR)", value=f"{overall_twr:.2f}%")
-    
-    with col2:
-        st.metric(label="Maximum Drawdown", value=f"{max_drawdown:.2f}%")
-    
-    with col3:
-        latest_value = daily_portfolio_df['Total_Portfolio_Value'].iloc[-1]
-        st.metric(label="Current Portfolio Value", value=f"${latest_value:,.2f}")
+# --- Step 2: V2 Summary Metrics & Key Insights ---
+st.subheader("Performance Summary (V2)")
+
+# Calculate TWR and Drawdown from daily_portfolio_df
+overall_twr = (1 + daily_portfolio_df['daily_return_adjusted']).cumprod().iloc[-1] - 1
+max_drawdown = daily_portfolio_df['drawdown'].min()
+
+# Display metrics
+col1, col2, col3 = st.columns(3)
+col1.metric("Overall Time-Weighted Return", f"{overall_twr * 100:.2f}%")
+col2.metric("Maximum Drawdown", f"{max_drawdown * 100:.2f}%")
+col3.metric("Total Realized P/L", f"${closed_trades_df['realized_profit_loss'].sum():,.2f}")
+
+st.markdown("---")
+
+# --- Step 3: V2 Portfolio Value Visualization ---
+st.subheader("Daily Portfolio Value Over Time")
+fig_portfolio_value = px.line(daily_portfolio_df, 
+                               y=['Total_Portfolio_Value', 'Cash_Balance', 'Stock_Market_Value'], 
+                               title='Daily Portfolio Value Components Over Time (V2)')
+st.plotly_chart(fig_portfolio_value, use_container_width=True)
+
+st.markdown("---")
+
+# --- Step 4: V2 Drawdown Visualization ---
+st.subheader("Portfolio Drawdown Over Time")
+fig_drawdown = go.Figure(data=go.Scatter(
+    x=daily_portfolio_df.index,
+    y=daily_portfolio_df['drawdown'] * 100,
+    fill='tozeroy',
+    mode='lines',
+    line_color='red',
+    name='Drawdown'
+))
+fig_drawdown.update_layout(
+    title='Portfolio Drawdown Over Time (V2)',
+    xaxis_title='Date',
+    yaxis_title='Drawdown (%)'
+)
+st.plotly_chart(fig_drawdown, use_container_width=True)
+
+st.markdown("---")
+
+# --- Step 5: V1-style Realized P/L Table & Holdings Table ---
+st.subheader("Realized P/L by Instrument")
+if not closed_trades_df.empty:
+    realized_pl_summary = closed_trades_df.groupby('instrument')['realized_profit_loss'].sum().reset_index()
+    realized_pl_summary.columns = ['Instrument', 'Total Realized P/L ($)']
+    realized_pl_summary.sort_values(by='Total Realized P/L ($)', ascending=False, inplace=True)
+    st.dataframe(realized_pl_summary, use_container_width=True)
+else:
+    st.info("No closed trades found to display realized P/L.")
+
+st.subheader("Current Portfolio Holdings")
+current_holdings_df = get_current_holdings(transactions_cleaned_df)
+if not current_holdings_df.empty:
+    st.dataframe(current_holdings_df.sort_values(by='quantity', ascending=False), use_container_width=True)
+else:
+    st.info("No current holdings found.")
