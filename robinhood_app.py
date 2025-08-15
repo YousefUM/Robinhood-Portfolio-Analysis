@@ -13,43 +13,63 @@ DB_FILE = 'robinhood_portfolio.db'
 @st.cache_data
 def get_current_holdings(transactions_df):
     """
-    Calculates the current open positions and their cost basis.
-    This logic mirrors our Phase 10/New Phase 6 calculation.
+    Calculates the current open positions and their cost basis using FIFO logic.
+    This logic mirrors our Phase 7 realized P/L calculation but stores open lots.
     """
     current_open_positions = {}
-    grouped_by_instrument = transactions_df.groupby('instrument')
+    
+    # We only care about Trade category for share quantity changes
+    instrument_relevant_actions = transactions_df[
+        transactions_df['transaction_category'] == 'Trade'
+    ].copy()
+
+    if instrument_relevant_actions.empty:
+        return pd.DataFrame(columns=['instrument', 'quantity', 'cost_basis_total'])
+
+    grouped_by_instrument = instrument_relevant_actions.groupby('instrument')
 
     for instrument_name, group in grouped_by_instrument:
-        instrument_relevant_actions = group[
-            group['transaction_category'] == 'Trade'
-        ].copy()
-
-        if instrument_relevant_actions.empty:
-            continue
-
-        instrument_current_quantity = 0.0
-        instrument_current_cost_basis = 0.0
-
-        for index, row in instrument_relevant_actions.iterrows():
+        buy_lots_for_instrument = deque() # Stores {'quantity': float, 'price': float, 'date': datetime}
+        
+        for index, row in group.iterrows():
             trans_code = row['trans_code']
-            quantity_change = row['quantity']
-            price_adjusted = row['price']
-
-            instrument_current_quantity += quantity_change
+            quantity = row['quantity'] # This is the already adjusted quantity
+            price = row['price']       # This is the already adjusted price
+            activity_date = row['activity_date']
 
             if trans_code == 'Buy':
-                instrument_current_cost_basis += (quantity_change * price_adjusted)
-            elif trans_code == 'Sell':
-                if (instrument_current_quantity - quantity_change) > 1e-6:
-                    cost_per_share_before_sell = instrument_current_cost_basis / (instrument_current_quantity - quantity_change) if (instrument_current_quantity - quantity_change) > 1e-6 else 0
-                    instrument_current_cost_basis -= (cost_per_share_before_sell * quantity_change)
+                if pd.notna(quantity) and quantity > 0 and pd.notna(price):
+                     buy_lots_for_instrument.append({'quantity': quantity, 'price': price, 'date': activity_date})
+                # Note: No fallback for missing price/amount here to keep it simple;
+                # the pipeline should have already cleaned this up.
 
-        if abs(instrument_current_quantity) > 1e-6:
-            current_open_positions[instrument_name] = {
-                'quantity': instrument_current_quantity,
-                'cost_basis_total': instrument_current_cost_basis
-            }
-            
+            elif trans_code == 'Sell':
+                if pd.notna(quantity) and quantity > 0:
+                    sold_quantity_remaining = quantity
+                    while sold_quantity_remaining > 1e-9 and buy_lots_for_instrument:
+                        oldest_lot = buy_lots_for_instrument[0]
+                        lot_quantity = oldest_lot['quantity']
+                        
+                        quantity_to_sell_from_lot = min(sold_quantity_remaining, lot_quantity)
+                        
+                        sold_quantity_remaining -= quantity_to_sell_from_lot
+                        oldest_lot['quantity'] -= quantity_to_sell_from_lot
+
+                        if oldest_lot['quantity'] < 1e-9: # Lot fully consumed or negligible
+                            buy_lots_for_instrument.popleft()
+                            
+        # After processing all transactions for this instrument, sum up remaining lots
+        if buy_lots_for_instrument:
+            total_current_quantity = sum(lot['quantity'] for lot in buy_lots_for_instrument)
+            total_current_cost_basis = sum(lot['quantity'] * lot['price'] for lot in buy_lots_for_instrument)
+
+            if abs(total_current_quantity) > 1e-9:
+                 current_open_positions[instrument_name] = {
+                    'quantity': total_current_quantity,
+                    'cost_basis_total': total_current_cost_basis
+                }
+
+    # Convert to DataFrame for display
     final_holdings_list = [
         {'instrument': ticker, 'quantity': details['quantity'], 'cost_basis_total': details['cost_basis_total']}
         for ticker, details in current_open_positions.items()
@@ -99,8 +119,8 @@ closed_trades_df['sell_date'] = pd.to_datetime(closed_trades_df['sell_date'])
 st.subheader("Performance Summary (V2)")
 
 # Calculate TWR and Drawdown from daily_portfolio_df
-overall_twr = (1 + daily_portfolio_df['daily_return_adjusted']).cumprod().iloc[-1] - 1
-max_drawdown = daily_portfolio_df['drawdown'].min()
+overall_twr = (daily_portfolio_df['cumulative_twr_factor'].iloc[-1] - 1) if not daily_portfolio_df.empty and not daily_portfolio_df['cumulative_twr_factor'].empty else 0
+max_drawdown = daily_portfolio_df['drawdown'].min() if not daily_portfolio_df.empty else 0
 
 # Display metrics
 col1, col2, col3 = st.columns(3)
