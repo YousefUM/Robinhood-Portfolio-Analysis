@@ -17,7 +17,7 @@ def get_current_holdings(transactions_df):
     This logic mirrors our Phase 7 realized P/L calculation but stores open lots.
     """
     current_open_positions = {}
-    
+
     # We only care about Trade category for share quantity changes
     instrument_relevant_actions = transactions_df[
         transactions_df['transaction_category'] == 'Trade'
@@ -30,7 +30,7 @@ def get_current_holdings(transactions_df):
 
     for instrument_name, group in grouped_by_instrument:
         buy_lots_for_instrument = deque() # Stores {'quantity': float, 'price': float, 'date': datetime}
-        
+
         for index, row in group.iterrows():
             trans_code = row['trans_code']
             quantity = row['quantity'] # This is the already adjusted quantity
@@ -49,15 +49,15 @@ def get_current_holdings(transactions_df):
                     while sold_quantity_remaining > 1e-9 and buy_lots_for_instrument:
                         oldest_lot = buy_lots_for_instrument[0]
                         lot_quantity = oldest_lot['quantity']
-                        
+
                         quantity_to_sell_from_lot = min(sold_quantity_remaining, lot_quantity)
-                        
+
                         sold_quantity_remaining -= quantity_to_sell_from_lot
                         oldest_lot['quantity'] -= quantity_to_sell_from_lot
 
                         if oldest_lot['quantity'] < 1e-9: # Lot fully consumed or negligible
                             buy_lots_for_instrument.popleft()
-                            
+
         # After processing all transactions for this instrument, sum up remaining lots
         if buy_lots_for_instrument:
             total_current_quantity = sum(lot['quantity'] for lot in buy_lots_for_instrument)
@@ -85,11 +85,11 @@ st.markdown("---")
 conn = None
 try:
     conn = sqlite3.connect(DB_FILE)
-    
+
     # Load the daily portfolio snapshots for main charts
     daily_portfolio_df = pd.read_sql_query("SELECT * FROM daily_portfolio_snapshots", conn)
     daily_portfolio_df['Date'] = pd.to_datetime(daily_portfolio_df['Date'])
-    
+
     # Load the realized P/L summary for performance metrics
     closed_trades_df = pd.read_sql_query("SELECT * FROM closed_trades_summary", conn)
 
@@ -98,7 +98,7 @@ try:
     transactions_cleaned_df['activity_date'] = pd.to_datetime(transactions_cleaned_df['activity_date'])
 
     st.success(f"Successfully loaded data from '{DB_FILE}'")
-    
+
 except sqlite3.Error as e:
     st.error(f"SQLite error: {e}. Please ensure '{DB_FILE}' exists.")
     st.stop()
@@ -118,24 +118,106 @@ closed_trades_df['sell_date'] = pd.to_datetime(closed_trades_df['sell_date'])
 # --- Step 2: V2 Summary Metrics & Key Insights ---
 st.subheader("Performance Summary (V2)")
 
-# Calculate TWR and Drawdown from daily_portfolio_df
-overall_twr = (daily_portfolio_df['cumulative_twr_factor'].iloc[-1] - 1) if not daily_portfolio_df.empty and not daily_portfolio_df['cumulative_twr_factor'].empty else 0
+# --- Metric Calculations ---
+# Overall TWR
+overall_twr = (daily_portfolio_df['cumulative_twr_factor'].iloc[-1] - 1) if not daily_portfolio_df.empty else 0
+
+# Max Drawdown
 max_drawdown = daily_portfolio_df['drawdown'].min() if not daily_portfolio_df.empty else 0
 
-# Display metrics
-col1, col2, col3 = st.columns(3)
+# Total Realized P/L
+total_realized_pl = closed_trades_df['realized_profit_loss'].sum()
+
+# --- NEW: Risk Metric Calculations ---
+# Check if we have enough data to calculate risk metrics
+if not daily_portfolio_df.empty and 'daily_return_adjusted' in daily_portfolio_df.columns and len(daily_portfolio_df) > 1:
+    # 1. Annualized Volatility (Standard Deviation of daily returns)
+    # We multiply by sqrt(252) because there are approx. 252 trading days in a year
+    volatility = daily_portfolio_df['daily_return_adjusted'].std() * np.sqrt(252)
+
+    # 2. Sharpe Ratio (Risk-Adjusted Return)
+    # We need a risk-free rate. Let's assume a constant 2% annual rate for simplicity.
+    risk_free_rate = 0.02
+    daily_risk_free_rate = (1 + risk_free_rate)**(1/252) - 1
+
+    # Calculate excess returns over the risk-free rate
+    excess_returns = daily_portfolio_df['daily_return_adjusted'] - daily_risk_free_rate
+
+    # Annualized Sharpe Ratio = mean(excess returns) / std(excess returns) * sqrt(252)
+    sharpe_ratio = (excess_returns.mean() / excess_returns.std()) * np.sqrt(252) if excess_returns.std() != 0 else 0
+
+else:
+    volatility = 0
+    sharpe_ratio = 0
+
+
+# --- Display Metrics ---
+col1, col2, col3, col4 = st.columns(4)
 col1.metric("Overall Time-Weighted Return", f"{overall_twr * 100:.2f}%")
 col2.metric("Maximum Drawdown", f"{max_drawdown * 100:.2f}%")
-col3.metric("Total Realized P/L", f"${closed_trades_df['realized_profit_loss'].sum():,.2f}")
+col3.metric("Annualized Volatility", f"{volatility * 100:.2f}%")
+col4.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
+
+st.markdown("""
+<style>
+.small-font {
+    font-size:0.8rem;
+    font-style: italic;
+}
+</style>
+<p class="small-font">Note: Sharpe Ratio calculation assumes a 2% annual risk-free rate.</p>
+""", unsafe_allow_html=True)
+
 
 st.markdown("---")
 
 # --- Step 3: V2 Portfolio Value Visualization ---
 st.subheader("Daily Portfolio Value Over Time")
-fig_portfolio_value = px.line(daily_portfolio_df, 
-                               y=['Total_Portfolio_Value', 'Cash_Balance', 'Stock_Market_Value'], 
+fig_portfolio_value = px.line(daily_portfolio_df,
+                               y=['Total_Portfolio_Value', 'Cash_Balance', 'Stock_Market_Value'],
                                title='Daily Portfolio Value Components Over Time (V2)')
 st.plotly_chart(fig_portfolio_value, use_container_width=True)
+
+st.markdown("---")
+
+# --- Step 3.5: V2 Portfolio vs. Benchmark Visualization ---
+st.subheader("Portfolio Performance vs. S&P 500 Benchmark")
+
+# The 'benchmark_cumulative_return' column should now exist in the dataframe
+if 'benchmark_cumulative_return' in daily_portfolio_df.columns:
+    # Normalize the starting point to 1 for both portfolio and benchmark
+    portfolio_return = daily_portfolio_df['cumulative_twr_factor']
+    benchmark_return = daily_portfolio_df['benchmark_cumulative_return']
+
+    fig_benchmark = go.Figure()
+
+    # Add Portfolio TWR trace
+    fig_benchmark.add_trace(go.Scatter(
+        x=daily_portfolio_df.index,
+        y=portfolio_return,
+        mode='lines',
+        name='My Portfolio',
+        line=dict(color='royalblue', width=2)
+    ))
+
+    # Add Benchmark trace
+    fig_benchmark.add_trace(go.Scatter(
+        x=daily_portfolio_df.index,
+        y=benchmark_return,
+        mode='lines',
+        name='S&P 500 (^GSPC)',
+        line=dict(color='grey', width=2, dash='dash')
+    ))
+
+    fig_benchmark.update_layout(
+        title='Cumulative Growth: Portfolio vs. Benchmark',
+        xaxis_title='Date',
+        yaxis_title='Cumulative Return Factor (Growth of $1)',
+        legend_title='Legend'
+    )
+    st.plotly_chart(fig_benchmark, use_container_width=True)
+else:
+    st.info("Benchmark comparison data not found. Please re-run the data processing pipeline.")
 
 st.markdown("---")
 
