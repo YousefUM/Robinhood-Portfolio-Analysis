@@ -79,7 +79,7 @@ def get_current_holdings(transactions_df):
 
 
 # --- Step 1: Connect to the Database and Load Data ---
-st.header("Robinhood Portfolio Analysis (V2)")
+st.header("Robinhood Portfolio Analysis")
 st.markdown("---")
 
 conn = None
