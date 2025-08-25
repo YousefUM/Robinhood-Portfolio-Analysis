@@ -240,7 +240,9 @@ st.plotly_chart(fig_drawdown, use_container_width=True)
 
 st.markdown("---")
 
-# --- Step 5: V1-style Realized P/L Table & Holdings Table ---
+# --- Step 5: Realized P/L, Holdings, and Trading Performance ---
+
+# (This section remains the same)
 st.subheader("Realized P/L by Instrument")
 if not closed_trades_df.empty:
     realized_pl_summary = closed_trades_df.groupby('instrument')['realized_profit_loss'].sum().reset_index()
@@ -250,22 +252,16 @@ if not closed_trades_df.empty:
 else:
     st.info("No closed trades found to display realized P/L.")
 
+# (This section also remains the same)
 st.subheader("Current Portfolio Holdings")
 current_holdings_df = get_current_holdings(transactions_cleaned_df)
 if not current_holdings_df.empty:
     st.dataframe(current_holdings_df.sort_values(by='quantity', ascending=False), use_container_width=True)
 else:
     st.info("No current holdings found.")
-# (This is the end of your script)
 
-# --- This is the LAST existing section in your file ---
-st.subheader("Current Portfolio Holdings")
-current_holdings_df = get_current_holdings(transactions_cleaned_df)
-if not current_holdings_df.empty:
-    st.dataframe(current_holdings_df.sort_values(by='quantity', ascending=False), use_container_width=True)
-else:
-    st.info("No current holdings found.")
-# (Add this code to your robinhood_app.py file)
+# --- START OF NEW SECTION ---
+# (Place the new Trading Performance section here)
 st.markdown("---")
 st.subheader("Trading Performance Insights")
 
@@ -303,4 +299,6 @@ if not closed_trades_df.empty:
 
 else:
     st.info("No closed trades found to calculate Win/Loss Ratio.")
+
+# --- END OF SCRIPT ---
 
