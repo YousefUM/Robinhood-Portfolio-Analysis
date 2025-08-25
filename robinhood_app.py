@@ -256,7 +256,15 @@ if not current_holdings_df.empty:
     st.dataframe(current_holdings_df.sort_values(by='quantity', ascending=False), use_container_width=True)
 else:
     st.info("No current holdings found.")
+# (This is the end of your script)
 
+# --- This is the LAST existing section in your file ---
+st.subheader("Current Portfolio Holdings")
+current_holdings_df = get_current_holdings(transactions_cleaned_df)
+if not current_holdings_df.empty:
+    st.dataframe(current_holdings_df.sort_values(by='quantity', ascending=False), use_container_width=True)
+else:
+    st.info("No current holdings found.")
 # (Add this code to your robinhood_app.py file)
 st.markdown("---")
 st.subheader("Trading Performance Insights")
