@@ -257,6 +257,7 @@ if not current_holdings_df.empty:
 else:
     st.info("No current holdings found.")
 
+# (This is the corrected section for your robinhood_app.py file)
 st.markdown("---")
 st.subheader("Trading Performance Insights")
 
@@ -267,22 +268,28 @@ if not closed_trades_df.empty:
 
     total_trades = len(closed_trades_df)
     win_count = len(winning_trades)
-    loss_count = len(losing_trades)
-
+    
     win_rate = (win_count / total_trades) * 100 if total_trades > 0 else 0
 
-    # Calculate average gain and loss
+    # Safely calculate average gain and loss
     avg_win = winning_trades['realized_profit_loss'].mean() if not winning_trades.empty else 0
     avg_loss = losing_trades['realized_profit_loss'].mean() if not losing_trades.empty else 0
 
-    # Profit Factor
+    # Safely calculate Profit Factor
     total_gains = winning_trades['realized_profit_loss'].sum()
     total_losses = abs(losing_trades['realized_profit_loss'].sum())
-    profit_factor = total_gains / total_losses if total_losses > 0 else (float('inf') if total_gains > 0 else 0)
+    
+    if total_losses > 0:
+        profit_factor = total_gains / total_losses
+    elif total_gains > 0:
+        profit_factor = float('inf') # Only gains, no losses
+    else:
+        profit_factor = 0 # No gains or losses
 
     # Display metrics
     col1, col2, col3 = st.columns(3)
     col1.metric("Win Rate", f"{win_rate:.2f}%", help="The percentage of closed trades that were profitable.")
+    # Use abs(avg_loss) to display it as a positive number
     col2.metric("Avg. Gain / Loss", f"${avg_win:,.2f} / ${abs(avg_loss):,.2f}", help="The average dollar amount for winning and losing trades.")
     col3.metric("Profit Factor", f"{profit_factor:.2f}", help="Total gains divided by total losses. A value > 1 indicates profitability.")
 
