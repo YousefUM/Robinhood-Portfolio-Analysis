@@ -115,7 +115,8 @@ col4.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
 st.markdown("---")
 
 # --- Main Content in Tabs ---
-tab_main, tab_analysis = st.tabs(["📊 Main Dashboard", "🔬 Detailed Analysis"])
+#tab_main, tab_analysis = st.tabs(["📊 Main Dashboard", "🔬 Detailed Analysis"])
+tab_main, tab_analysis, tab_cash_flow = st.tabs(["📊 Main Dashboard", "🔬 Detailed Analysis", "💸 Cash Flow"])
 
 with tab_main:
     st.subheader("Current Portfolio Holdings")
@@ -239,3 +240,69 @@ with tab_analysis:
         if not instrument_closed_trades.empty:
             st.markdown("##### Closed Trades Summary")
             st.dataframe(instrument_closed_trades[['sell_date', 'sold_quantity_transaction', 'sell_price', 'realized_profit_loss', 'holding_period_days']].sort_values(by='sell_date', ascending=False), use_container_width=True)
+# (This code goes at the end of your robinhood_app.py file)
+
+with tab_cash_flow:
+    st.subheader("Cash Flow Analysis 💰")
+    st.markdown("This section analyzes all non-trade financial activities, such as dividends, fees, and deposits/withdrawals.")
+
+    # Filter for all non-trade cash flow transactions
+    cash_flow_categories = ['Income', 'Expense', 'Cash_Movement', 'Corporate_Action', 'Cash_Adjustment']
+    non_trade_cash_flows_df = transactions_cleaned_df[
+        transactions_cleaned_df['transaction_category'].isin(cash_flow_categories)
+    ].copy()
+
+    if not non_trade_cash_flows_df.empty:
+        # --- Key Metrics Display ---
+        total_income = non_trade_cash_flows_df[non_trade_cash_flows_df['transaction_category'] == 'Income']['amount'].sum()
+        total_expense = non_trade_cash_flows_df[non_trade_cash_flows_df['transaction_category'] == 'Expense']['amount'].sum()
+        net_cash_movement = non_trade_cash_flows_df[non_trade_cash_flows_df['transaction_category'] == 'Cash_Movement']['amount'].sum()
+
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+        metric_col1.metric("Total Income", f"${total_income:,.2f}", help="All income from dividends (CDIV, MDIV), interest (INT), and other sources (REC).")
+        metric_col2.metric("Total Expenses", f"${total_expense:,.2f}", help="All expenses from fees (DFEE, AFEE), taxes (DTAX), and subscriptions (GOLD).")
+        metric_col3.metric("Net Deposits", f"${net_cash_movement:,.2f}", help="Total cash deposited into the account minus total cash withdrawn.")
+        
+        st.markdown("---")
+
+        # --- Visualizations ---
+        viz_col1, viz_col2 = st.columns(2)
+
+        with viz_col1:
+            st.markdown("##### Income Sources")
+            income_df = non_trade_cash_flows_df[non_trade_cash_flows_df['transaction_category'] == 'Income']
+            if not income_df.empty:
+                income_by_type = income_df.groupby('trans_code')['amount'].sum().reset_index()
+                fig_income = px.pie(income_by_type, names='trans_code', values='amount', title='Income Breakdown by Type', hole=0.4)
+                fig_income.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_income, use_container_width=True)
+            else:
+                st.info("No income data to display.")
+
+        with viz_col2:
+            st.markdown("##### Expense Sources")
+            expense_df = non_trade_cash_flows_df[non_trade_cash_flows_df['transaction_category'] == 'Expense']
+            if not expense_df.empty:
+                # Use absolute value for expenses since they are negative
+                expense_by_type = expense_df.groupby('trans_code')['amount'].sum().abs().reset_index()
+                fig_expense = px.pie(expense_by_type, names='trans_code', values='amount', title='Expense Breakdown by Type', hole=0.4)
+                fig_expense.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_expense, use_container_width=True)
+            else:
+                st.info("No expense data to display.")
+        
+        st.markdown("---")
+
+        # --- Cumulative Cash Flow Chart ---
+        st.subheader("Cumulative Net Cash Flow Over Time")
+        daily_cash_flow = non_trade_cash_flows_df.groupby(non_trade_cash_flows_df['activity_date'].dt.date)['amount'].sum().reset_index()
+        daily_cash_flow.columns = ['Date', 'Daily_Net_Cash_Flow']
+        daily_cash_flow.sort_values('Date', inplace=True)
+        daily_cash_flow['Cumulative_Cash_Flow'] = daily_cash_flow['Daily_Net_Cash_Flow'].cumsum()
+        
+        fig_cumulative_cash = px.area(daily_cash_flow, x='Date', y='Cumulative_Cash_Flow', title='Cumulative Net Cash Flow (Non-Trade Activities)')
+        fig_cumulative_cash.update_layout(xaxis_title='Date', yaxis_title='Cumulative Cash Flow ($)')
+        st.plotly_chart(fig_cumulative_cash, use_container_width=True)
+
+    else:
+        st.warning("No cash flow transaction data found to generate the analysis.")
