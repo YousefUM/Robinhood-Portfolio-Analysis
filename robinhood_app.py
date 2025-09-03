@@ -157,7 +157,7 @@ with tab_main:
             if all_tickers:
                 dividend_yield_data = get_live_dividend_yields(all_tickers)
                 # Map the results and multiply by 100 for percentage display
-                holdings_summary_df['dividend_yield'] = holdings_summary_df['instrument'].map(dividend_yield_data)
+                holdings_summary_df['dividend_yield'] = holdings_summary_df['instrument'].map(dividend_yield_data)*1
             else:
                 holdings_summary_df['dividend_yield'] = 0
             # --- END MODIFICATION ---
