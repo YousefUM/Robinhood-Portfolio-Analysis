@@ -115,7 +115,7 @@ with tab_main:
 
         # 2. Map live data to the DataFrame
         holdings_df['current_price'] = holdings_df['instrument'].map(live_prices).fillna(0)
-        holdings_df['dividend_yield'] = holdings_df['instrument'].map(dividend_yields).fillna(0) * 100
+        holdings_df['dividend_yield'] = holdings_df['instrument'].map(dividend_yields).fillna(0)
 
         # 3. Perform calculations using live data
         holdings_df['market_value'] = holdings_df['quantity'] * holdings_df['current_price']
