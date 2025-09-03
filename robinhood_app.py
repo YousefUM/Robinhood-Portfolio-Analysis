@@ -35,7 +35,7 @@ def get_current_holdings(transactions_df):
             trans_code = row['trans_code']
             quantity = row['quantity']
             price = row['price']
-            
+
             if trans_code == 'Buy':
                 if pd.notna(quantity) and quantity > 0 and pd.notna(price):
                      buy_lots_for_instrument.append({'quantity': quantity, 'price': price})
@@ -87,13 +87,13 @@ def get_live_dividend_yields(tickers):
         # If bulk fetch fails, return a dictionary of zeros to prevent app crash
         for ticker_symbol in tickers:
             yields[ticker_symbol] = 0
-            
+
     return yields
 # --- END NEW FUNCTION ---
 
 
 # --- Main App ---
-st.title("嶋 Robinhood Portfolio Analysis")
+st.title("📈 Robinhood Portfolio Analysis")
 st.markdown("---")
 
 # --- Data Loading ---
@@ -107,7 +107,7 @@ try:
     daily_portfolio_df['Date'] = pd.to_datetime(daily_portfolio_df['Date'])
     daily_portfolio_df.set_index('Date', inplace=True)
     daily_portfolio_df.sort_index(inplace=True)
-    
+
     closed_trades_df['sell_date'] = pd.to_datetime(closed_trades_df['sell_date'])
     transactions_cleaned_df['activity_date'] = pd.to_datetime(transactions_cleaned_df['activity_date'])
 
@@ -142,7 +142,7 @@ col4.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
 st.markdown("---")
 
 # --- Main Content in Tabs ---
-tab_main, tab_analysis, tab_cash_flow = st.tabs(["投 Main Dashboard", "溌 Detailed Analysis", "銭 Cash Flow"])
+tab_main, tab_analysis, tab_cash_flow = st.tabs(["📈 Main Dashboard", "📊 Detailed Analysis", "💰 Cash Flow"])
 
 with tab_main:
     st.subheader("Current Portfolio Holdings")
@@ -157,7 +157,7 @@ with tab_main:
             if all_tickers:
                 dividend_yield_data = get_live_dividend_yields(all_tickers)
                 # Map the results and multiply by 100 for percentage display
-                holdings_summary_df['dividend_yield'] = holdings_summary_df['instrument'].map(dividend_yield_data) * 100
+                holdings_summary_df['dividend_yield'] = holdings_summary_df['instrument'].map(dividend_yield_data)
             else:
                 holdings_summary_df['dividend_yield'] = 0
             # --- END MODIFICATION ---
@@ -167,9 +167,9 @@ with tab_main:
                 holdings_summary_df['portfolio_allocation_pct'] = (holdings_summary_df['market_value'] / total_market_value) * 100
             else:
                 holdings_summary_df['portfolio_allocation_pct'] = 0
-                
+
             holdings_summary_df['unrealized_pl_pct'] = (holdings_summary_df['unrealized_pl'] / holdings_summary_df['cost_basis_total'].replace(0, np.nan)) * 100
-            
+
             # --- MODIFICATION: ADDED 'dividend_yield' to display and config ---
             st.dataframe(
                 holdings_summary_df[['instrument', 'quantity', 'avg_cost_price', 'current_price', 'market_value', 'dividend_yield', 'unrealized_pl', 'unrealized_pl_pct', 'portfolio_allocation_pct']].sort_values(by='market_value', ascending=False),
@@ -226,7 +226,7 @@ with tab_analysis:
         avg_loss = losing_trades['realized_profit_loss'].mean() if not losing_trades.empty else 0
         total_gains = winning_trades['realized_profit_loss'].sum()
         total_losses = abs(losing_trades['realized_profit_loss'].sum())
-        
+
         if total_losses > 0:
             profit_factor = total_gains / total_losses
         elif total_gains > 0:
@@ -240,19 +240,19 @@ with tab_analysis:
         col3.metric("Profit Factor", f"{profit_factor:.2f}", help="Total gains divided by total losses. A value > 1 indicates profitability.")
     else:
         st.info("No closed trades to analyze.")
-    
+
     st.markdown("---")
     st.subheader("Portfolio Sector Allocation")
     try:
         conn = sqlite3.connect(DB_FILE)
         sector_df = pd.read_sql_query("SELECT * FROM instrument_sectors", conn)
         conn.close()
-        
+
         if not current_holdings_df.empty and not sector_df.empty:
             holdings_with_sector = pd.merge(current_holdings_df, sector_df, on='instrument', how='left')
             holdings_with_sector['sector'].fillna('N/A', inplace=True)
             sector_allocation = holdings_with_sector.groupby('sector')['cost_basis_total'].sum().reset_index()
-            
+
             fig_pie = px.pie(sector_allocation, names='sector', values='cost_basis_total', title='Sector Allocation by Cost Basis', hole=0.3)
             fig_pie.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig_pie, use_container_width=True)
@@ -262,29 +262,29 @@ with tab_analysis:
         st.warning(f"Could not generate sector analysis: {e}")
 
     st.markdown("---")
-    st.subheader("Instrument-Specific Analysis 剥")
+    st.subheader("Instrument-Specific Analysis 🔍")
     all_instruments = sorted(transactions_cleaned_df['instrument'].dropna().unique().tolist())
     selected_instrument = st.selectbox("Select an Instrument to Analyze", all_instruments)
 
     if selected_instrument:
         instrument_transactions = transactions_cleaned_df[transactions_cleaned_df['instrument'] == selected_instrument]
         instrument_closed_trades = closed_trades_df[closed_trades_df['instrument'] == selected_instrument]
-        
+
         st.markdown(f"#### Performance Metrics for **{selected_instrument}**")
         total_realized_pl = instrument_closed_trades['realized_profit_loss'].sum()
         win_count = instrument_closed_trades[instrument_closed_trades['realized_profit_loss'] > 0].shape[0]
         loss_count = instrument_closed_trades[instrument_closed_trades['realized_profit_loss'] < 0].shape[0]
         total_closed_trades = win_count + loss_count
         win_rate_instrument = (win_count / total_closed_trades) * 100 if total_closed_trades > 0 else 0
-        
+
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Realized P/L", f"${total_realized_pl:,.2f}")
         col2.metric("Win Rate", f"{win_rate_instrument:.2f}%")
         col3.metric("Closed Trades", f"{total_closed_trades}")
-        
+
         st.markdown("##### Transaction History")
         st.dataframe(instrument_transactions[['activity_date', 'trans_code', 'quantity', 'price', 'amount']].sort_values(by='activity_date', ascending=False), use_container_width=True)
-        
+
         if not instrument_closed_trades.empty:
             st.markdown("##### Closed Trades Summary")
             st.dataframe(instrument_closed_trades[['sell_date', 'sold_quantity_transaction', 'sell_price', 'realized_profit_loss', 'holding_period_days']].sort_values(by='sell_date', ascending=False), use_container_width=True)
@@ -309,7 +309,7 @@ with tab_cash_flow:
         metric_col1.metric("Total Income", f"${total_income:,.2f}", help="All income from dividends (CDIV, MDIV), interest (INT), and other sources (REC).")
         metric_col2.metric("Total Expenses", f"${total_expense:,.2f}", help="All expenses from fees (DFEE, AFEE), taxes (DTAX), and subscriptions (GOLD).")
         metric_col3.metric("Net Deposits", f"${net_cash_movement:,.2f}", help="Total cash deposited into the account minus total cash withdrawn.")
-        
+
         st.markdown("---")
 
         # --- Visualizations ---
@@ -337,7 +337,7 @@ with tab_cash_flow:
                 st.plotly_chart(fig_expense, use_container_width=True)
             else:
                 st.info("No expense data to display.")
-        
+
         st.markdown("---")
 
         # --- Cumulative Cash Flow Chart ---
@@ -346,7 +346,7 @@ with tab_cash_flow:
         daily_cash_flow.columns = ['Date', 'Daily_Net_Cash_Flow']
         daily_cash_flow.sort_values('Date', inplace=True)
         daily_cash_flow['Cumulative_Cash_Flow'] = daily_cash_flow['Daily_Net_Cash_Flow'].cumsum()
-        
+
         fig_cumulative_cash = px.area(daily_cash_flow, x='Date', y='Cumulative_Cash_Flow', title='Cumulative Net Cash Flow (Non-Trade Activities)')
         fig_cumulative_cash.update_layout(xaxis_title='Date', yaxis_title='Cumulative Cash Flow ($)')
         st.plotly_chart(fig_cumulative_cash, use_container_width=True)
