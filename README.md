@@ -3,7 +3,7 @@
 ## Project Overview
 This project is a comprehensive data analysis tool designed to ingest, clean, and analyze a user's Robinhood transaction history. The goal is to provide accurate financial metrics and insightful visualizations that go beyond the basic reports offered by Robinhood.
 
-This repository contains the complete codebase for **Version 2 (V2)**, featuring a robust data pipeline and a powerful Streamlit web application.
+This repository contains the complete codebase for **Version 2**, featuring a robust data pipeline and a powerful Streamlit web application.
 
 🔗 **Try the live app here:** [Robinhood Portfolio Analysis](https://robinhood-portfolio-analysis.streamlit.app/)
 
