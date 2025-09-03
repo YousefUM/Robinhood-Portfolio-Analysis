@@ -61,7 +61,7 @@ try:
     closed_trades_df = pd.read_sql_query("SELECT * FROM closed_trades_summary", conn)
     transactions_cleaned_df = pd.read_sql_query("SELECT * FROM transactions_cleaned", conn)
     # NEW: Load from the simplified open positions table
-    open_positions_df = pd.read_sql_query("SELECT * FROM open_positions_summary", conn)
+    open_positions_df = pd.read_sql_query("SELECT * FROM current_holdings_summary", conn)
     conn.close()
 
     # Standard date conversions
