@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from collections import deque
 import numpy as np
+import yfinance as yf # <-- ADDED: Import yfinance
 
 # --- Page Configuration (Set at the very top) ---
 st.set_page_config(layout="wide", page_title="Robinhood Portfolio Analysis")
@@ -65,8 +66,34 @@ def get_current_holdings(transactions_df):
     current_holdings_df = pd.DataFrame(final_holdings_list)
     return current_holdings_df
 
+# --- NEW CACHED FUNCTION FOR LIVE DIVIDEND YIELDS ---
+@st.cache_data(ttl=3600)  # Cache the results for 1 hour (3600 seconds)
+def get_live_dividend_yields(tickers):
+    """
+    Fetches the current dividend yield for a list of tickers directly from yfinance.
+    Returns a dictionary mapping tickers to their dividend yield.
+    """
+    yields = {}
+    # Use yfinance's multi-ticker download for efficiency
+    try:
+        tickers_data = yf.Tickers(tickers)
+        for ticker_symbol in tickers:
+            # yfinance stores info in a dictionary for each ticker object
+            info = tickers_data.tickers[ticker_symbol.upper()].info
+            yield_value = info.get('dividendYield', 0)
+            yields[ticker_symbol] = yield_value if yield_value is not None else 0
+    except Exception as e:
+        st.toast(f"Could not fetch some live data: {e}", icon="⚠️")
+        # If bulk fetch fails, return a dictionary of zeros to prevent app crash
+        for ticker_symbol in tickers:
+            yields[ticker_symbol] = 0
+            
+    return yields
+# --- END NEW FUNCTION ---
+
+
 # --- Main App ---
-st.title("📈 Robinhood Portfolio Analysis")
+st.title("嶋 Robinhood Portfolio Analysis")
 st.markdown("---")
 
 # --- Data Loading ---
@@ -115,8 +142,7 @@ col4.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
 st.markdown("---")
 
 # --- Main Content in Tabs ---
-#tab_main, tab_analysis = st.tabs(["📊 Main Dashboard", "🔬 Detailed Analysis"])
-tab_main, tab_analysis, tab_cash_flow = st.tabs(["📊 Main Dashboard", "🔬 Detailed Analysis", "💸 Cash Flow"])
+tab_main, tab_analysis, tab_cash_flow = st.tabs(["投 Main Dashboard", "溌 Detailed Analysis", "銭 Cash Flow"])
 
 with tab_main:
     st.subheader("Current Portfolio Holdings")
@@ -126,6 +152,16 @@ with tab_main:
         conn.close()
 
         if not holdings_summary_df.empty:
+            # --- MODIFICATION: FETCH LIVE DIVIDEND YIELDS ---
+            all_tickers = holdings_summary_df['instrument'].tolist()
+            if all_tickers:
+                dividend_yield_data = get_live_dividend_yields(all_tickers)
+                # Map the results and multiply by 100 for percentage display
+                holdings_summary_df['dividend_yield'] = holdings_summary_df['instrument'].map(dividend_yield_data) * 100
+            else:
+                holdings_summary_df['dividend_yield'] = 0
+            # --- END MODIFICATION ---
+
             total_market_value = holdings_summary_df['market_value'].sum()
             if total_market_value > 0:
                 holdings_summary_df['portfolio_allocation_pct'] = (holdings_summary_df['market_value'] / total_market_value) * 100
@@ -134,12 +170,24 @@ with tab_main:
                 
             holdings_summary_df['unrealized_pl_pct'] = (holdings_summary_df['unrealized_pl'] / holdings_summary_df['cost_basis_total'].replace(0, np.nan)) * 100
             
+            # --- MODIFICATION: ADDED 'dividend_yield' to display and config ---
             st.dataframe(
-                holdings_summary_df[['instrument', 'quantity', 'avg_cost_price', 'current_price', 'market_value', 'unrealized_pl', 'unrealized_pl_pct', 'portfolio_allocation_pct']].sort_values(by='market_value', ascending=False),
-                column_config={ "quantity": st.column_config.NumberColumn(format="%.4f"), "avg_cost_price": st.column_config.NumberColumn("Avg Cost", format="$%.2f"), "current_price": st.column_config.NumberColumn("Current Price", format="$%.2f"), "market_value": st.column_config.NumberColumn("Market Value", format="$%,.2f"), "unrealized_pl": st.column_config.NumberColumn("Unrealized P/L", format="$%,.2f"), "unrealized_pl_pct": st.column_config.NumberColumn("Unrealized P/L %", format="%.2f%%"), "portfolio_allocation_pct": st.column_config.NumberColumn("Allocation %", format="%.2f%%"), },
+                holdings_summary_df[['instrument', 'quantity', 'avg_cost_price', 'current_price', 'market_value', 'dividend_yield', 'unrealized_pl', 'unrealized_pl_pct', 'portfolio_allocation_pct']].sort_values(by='market_value', ascending=False),
+                column_config={
+                    "instrument": st.column_config.TextColumn("Instrument"),
+                    "quantity": st.column_config.NumberColumn(format="%.4f"),
+                    "avg_cost_price": st.column_config.NumberColumn("Avg Cost", format="$%.2f"),
+                    "current_price": st.column_config.NumberColumn("Current Price", format="$%.2f"),
+                    "market_value": st.column_config.NumberColumn("Market Value", format="$%,.2f"),
+                    "dividend_yield": st.column_config.NumberColumn("Yield (Live)", format="%.2f%%"),
+                    "unrealized_pl": st.column_config.NumberColumn("Unrealized P/L", format="$%,.2f"),
+                    "unrealized_pl_pct": st.column_config.NumberColumn("Unrealized P/L %", format="%.2f%%"),
+                    "portfolio_allocation_pct": st.column_config.NumberColumn("Allocation %", format="%.2f%%"),
+                },
                 use_container_width=True,
                 height=35 * (len(holdings_summary_df) + 1)
             )
+            # --- END MODIFICATION ---
         else:
             st.info("No current holdings found.")
     except Exception as e:
@@ -214,7 +262,7 @@ with tab_analysis:
         st.warning(f"Could not generate sector analysis: {e}")
 
     st.markdown("---")
-    st.subheader("Instrument-Specific Analysis 🔍")
+    st.subheader("Instrument-Specific Analysis 剥")
     all_instruments = sorted(transactions_cleaned_df['instrument'].dropna().unique().tolist())
     selected_instrument = st.selectbox("Select an Instrument to Analyze", all_instruments)
 
@@ -240,7 +288,6 @@ with tab_analysis:
         if not instrument_closed_trades.empty:
             st.markdown("##### Closed Trades Summary")
             st.dataframe(instrument_closed_trades[['sell_date', 'sold_quantity_transaction', 'sell_price', 'realized_profit_loss', 'holding_period_days']].sort_values(by='sell_date', ascending=False), use_container_width=True)
-# (This code goes at the end of your robinhood_app.py file)
 
 with tab_cash_flow:
     st.subheader("Cash Flow Analysis 💰")
