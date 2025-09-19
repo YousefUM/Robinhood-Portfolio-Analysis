@@ -5,7 +5,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from collections import deque
 import numpy as np
-import yfinance as yf # <-- ADDED IMPORT
+import yfinance as yf
+import os # <-- ADDED IMPORT
+import datetime # <-- ADDED IMPORT
 
 # --- Page Configuration (Set at the very top) ---
 st.set_page_config(layout="wide", page_title="Robinhood Portfolio Analysis")
@@ -115,6 +117,16 @@ try:
 except Exception as e:
     st.error(f"An error occurred during data loading: {e}. Please ensure '{DB_FILE}' exists and the data pipeline has been run successfully.")
     st.stop()
+
+# --- NEW: Display Last Update Timestamp ---
+st.sidebar.title("Data Status")
+if not transactions_cleaned_df.empty:
+    last_update_date = transactions_cleaned_df['activity_date'].max()
+    st.sidebar.info(f"Latest transaction date: {last_update_date.strftime('%Y-%m-%d')}")
+else:
+    st.sidebar.warning("No transaction data found.")
+# --- END NEW SECTION ---
+
 
 # --- Key Metrics Display ---
 st.subheader("Performance Summary")
@@ -354,3 +366,4 @@ with tab_cash_flow:
 
     else:
         st.warning("No cash flow transaction data found to generate the analysis.")
+
